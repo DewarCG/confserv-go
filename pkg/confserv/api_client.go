@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ConfServClient interface {
@@ -13,6 +14,8 @@ type ConfServClient interface {
 	GetInt(setting string) (int, error)
 	GetBool(setting string) (bool, error)
 	GetFloat(setting string) (float64, error)
+	GetDuration(setting string) (time.Duration, error)
+	GetObjBinded(settingName string, dest any) error
 }
 
 func NewConfServClient(server string, token string) (ConfServClient, error) {
@@ -68,31 +71,50 @@ func (s *confServClientImpl) GetString(settingName string) (string, error) {
 }
 
 func (s *confServClientImpl) GetInt(settingName string) (int, error) {
-	s2, err := s.GetString(settingName)
+	str, err := s.GetString(settingName)
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(s2)
+	return strconv.Atoi(str)
+}
+
+func (s *confServClientImpl) GetDuration(settingName string) (time.Duration, error) {
+	intValue, err := s.GetInt(settingName)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(intValue), nil
 }
 
 func (s *confServClientImpl) GetFloat(settingName string) (float64, error) {
-	s2, err := s.GetString(settingName)
+	str, err := s.GetString(settingName)
 	if err != nil {
 		return 0, err
 	}
-	return strconv.ParseFloat(s2, 64)
+	return strconv.ParseFloat(str, 64)
 }
 
 func (s *confServClientImpl) GetBool(settingName string) (bool, error) {
-	s2, err := s.GetString(settingName)
+	str, err := s.GetString(settingName)
 	if err != nil {
 		return false, err
 	}
-	if s2 == "true" || s2 == "on" || s2 == "yes" || s2 == "1" {
+	if str == "true" || str == "on" || str == "yes" || str == "1" {
 		return true, nil
 	}
-	if s2 == "false" || s2 == "off" || s2 == "no" || s2 == "0" {
+	if str == "false" || str == "off" || str == "no" || str == "0" {
 		return false, nil
 	}
 	return false, errors.New("invalid value")
+}
+
+func (s *confServClientImpl) GetObjBinded(settingName string, dest any) error {
+	response, err := s.getRaw(context.TODO(), settingName)
+	if err != nil {
+		return err
+	}
+	if response.Value == nil {
+		return nil
+	}
+	return json.Unmarshal([]byte(*response.Value), dest)
 }
