@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
+	"net/http"
 	"strings"
 	"time"
 )
 
 type ConfServClient interface {
-	GetString(setting string) (string, error)
-	GetInt(setting string) (int, error)
-	GetBool(setting string) (bool, error)
-	GetFloat(setting string) (float64, error)
-	GetDuration(setting string) (time.Duration, error)
-	GetObjBinded(settingName string, dest any) error
+	GetString(ctx context.Context, setting string) (string, error)
+	GetInt(ctx context.Context, setting string) (int, error)
+	GetBool(ctx context.Context, setting string) (bool, error)
+	GetFloat(ctx context.Context, setting string) (float64, error)
+	GetDuration(ctx context.Context, setting string) (time.Duration, error)
+	GetObjBinded(ctx context.Context, key string, dest any) error
 }
 
 func NewConfServClient(server string, token string) (ConfServClient, error) {
@@ -41,80 +41,67 @@ type confServClientImpl struct {
 	token     string
 }
 
-func (s *confServClientImpl) getRaw(ctx context.Context, setting string) (*SettingResponse, error) {
-	params := GetSettingByNameParams{
-		Token: s.token,
+func (s *confServClientImpl) getRawValue(ctx context.Context, key string, dest any) error {
+	params := GetSettingByKeyParams{
+		Authorization: "Bearer " + s.token,
 	}
-	httpResponse, err := s.rawClient.GetSettingByName(ctx, strings.ToLower(setting), &params)
-	if err != nil {
-		return nil, err
-	}
-	var response SettingResponse
-	err = json.NewDecoder(httpResponse.Body).Decode(&response)
-	if err != nil {
-		return nil, err
-	}
-	return &response, nil
-}
-
-func (s *confServClientImpl) GetString(settingName string) (string, error) {
-	ctx := context.TODO()
-	setting, err := s.getRaw(ctx, settingName)
-	if err != nil {
-		return "", err
-	}
-	empty := ""
-	if setting == nil {
-		return empty, nil
-	}
-	return *setting.Value, nil
-}
-
-func (s *confServClientImpl) GetInt(settingName string) (int, error) {
-	str, err := s.GetString(settingName)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(str)
-}
-
-func (s *confServClientImpl) GetDuration(settingName string) (time.Duration, error) {
-	intValue, err := s.GetInt(settingName)
-	if err != nil {
-		return 0, err
-	}
-	return time.Duration(intValue), nil
-}
-
-func (s *confServClientImpl) GetFloat(settingName string) (float64, error) {
-	str, err := s.GetString(settingName)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.ParseFloat(str, 64)
-}
-
-func (s *confServClientImpl) GetBool(settingName string) (bool, error) {
-	str, err := s.GetString(settingName)
-	if err != nil {
-		return false, err
-	}
-	if str == "true" || str == "on" || str == "yes" || str == "1" {
-		return true, nil
-	}
-	if str == "false" || str == "off" || str == "no" || str == "0" {
-		return false, nil
-	}
-	return false, errors.New("invalid value")
-}
-
-func (s *confServClientImpl) GetObjBinded(settingName string, dest any) error {
-	response, err := s.getRaw(context.TODO(), settingName)
+	httpResponse, err := s.rawClient.GetSettingByKey(ctx, strings.ToLower(key), &params)
 	if err != nil {
 		return err
 	}
-	if response.Value == nil {
-		return nil
+	if httpResponse.StatusCode >= http.StatusInternalServerError {
+		return errors.New("internal server error")
 	}
-	return json.Unmarshal([]byte(*response.Value), dest)
+	err = json.NewDecoder(httpResponse.Body).Decode(&dest)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *confServClientImpl) GetString(ctx context.Context, key string) (string, error) {
+	var result string
+	if err := s.getRawValue(ctx, key, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
+func (s *confServClientImpl) GetInt(ctx context.Context, key string) (int, error) {
+	floatValue, err := s.GetFloat(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	return int(floatValue), nil
+}
+
+func (s *confServClientImpl) GetDuration(ctx context.Context, key string) (time.Duration, error) {
+	floatValue, err := s.GetFloat(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(floatValue), nil
+}
+
+func (s *confServClientImpl) GetFloat(ctx context.Context, key string) (float64, error) {
+	var result float64
+	if err := s.getRawValue(ctx, key, &result); err != nil {
+		return 0, err
+	}
+	return result, nil
+}
+
+func (s *confServClientImpl) GetBool(ctx context.Context, key string) (bool, error) {
+	var result bool
+	if err := s.getRawValue(ctx, key, &result); err != nil {
+		return false, err
+	}
+	return result, nil
+}
+
+func (s *confServClientImpl) GetObjBinded(ctx context.Context, key string, dest any) error {
+	if err := s.getRawValue(ctx, key, &dest); err != nil {
+		return err
+	}
+	return nil
 }
